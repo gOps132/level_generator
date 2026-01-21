@@ -1,6 +1,6 @@
 class LevelGenerator {
     constructor() {
-        // Tile Types: 0 = Empty, 1 = Wall, 2 = Player Start, 3 = Box, 4 = Goal, 5 = Key, 6 = Door, 7 = Chest
+        // Tile Types: 0 = Empty, 1 = Wall, 2 = Player Start, 3 = Box, 4 = Goal, 5 = Key, 6 = Door, 7 = Chest, 8 = Lever, 9 = Lever Gate
     }
 
     generate(width, height, difficulty) {
@@ -77,15 +77,52 @@ class LevelGenerator {
         futureGrid[goal.y][goal.x] = 4;
 
         // 4. Place Key and Chest
-        const excludes = [start, goal];
+        // NEW LOGIC: Key is behind a Lever Gate (9). Lever (8) is reachable.
 
+        // A. Pick Key Location
+        const excludes = [start, goal];
         const keyPos = this.findEmptySpot(pastGrid, excludes);
         pastGrid[keyPos.y][keyPos.x] = 5; // Key
         excludes.push(keyPos);
 
+        // B. Surround Key with Walls, leave 1 spot for Gate
+        // But ensure we don't block start/goal if they are close
+        const keyNeighbors = [
+            { x: keyPos.x, y: keyPos.y - 1 },
+            { x: keyPos.x, y: keyPos.y + 1 },
+            { x: keyPos.x - 1, y: keyPos.y },
+            { x: keyPos.x + 1, y: keyPos.y }
+        ].filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
+
+        // Filter out start/goal from being walled
+        const safeKeyNeighbors = keyNeighbors.filter(p =>
+            !(p.x === start.x && p.y === start.y) && !(p.x === goal.x && p.y === goal.y)
+        );
+
+        if (safeKeyNeighbors.length > 0) {
+            const gateIndex = Math.floor(Math.random() * safeKeyNeighbors.length);
+            const gatePos = safeKeyNeighbors[gateIndex];
+
+            // Wall others
+            safeKeyNeighbors.forEach(p => {
+                if (p !== gatePos) pastGrid[p.y][p.x] = 1;
+            });
+
+            // Place Gate (9)
+            pastGrid[gatePos.y][gatePos.x] = 9;
+            // Force Gate/Wall in Future too to prevent bypassing via time travel if door decayed?
+            futureGrid[gatePos.y][gatePos.x] = 1;
+        }
+
+        // C. Place Lever (8)
+        // Must be reachable from Start initially (i.e. not behind the gate).
+        const leverPos = this.findEmptySpot(pastGrid, excludes);
+        pastGrid[leverPos.y][leverPos.x] = 8; // Lever
+        excludes.push(leverPos);
+
+        // D. Place Chest
         const chestPos = this.findEmptySpot(pastGrid, excludes);
         pastGrid[chestPos.y][chestPos.x] = 7; // Chest
-        // Ensure Future Chest is not a wall
         if (futureGrid[chestPos.y][chestPos.x] === 1) futureGrid[chestPos.y][chestPos.x] = 0;
         futureGrid[chestPos.y][chestPos.x] = 7;
 
@@ -100,23 +137,11 @@ class LevelGenerator {
 
         const validNeighbors = adjacent.filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
 
-        // Remove start pos from valid neighbors to avoid spawning door on start
         const safeNeighbors = validNeighbors.filter(p => !(p.x === start.x && p.y === start.y));
 
         if (safeNeighbors.length > 0) {
             const doorIndex = Math.floor(Math.random() * safeNeighbors.length);
             const doorPos = safeNeighbors[doorIndex];
-
-            // Set all neighbors to Wall first (EXCEPT start)
-            validNeighbors.forEach(p => {
-                if (!(p.x === start.x && p.y === start.y) && !(p.x === doorPos.x && p.y === doorPos.y)) {
-                    futureGrid[p.y][p.x] = 1;
-                }
-            });
-            // (Note: Above logic was slightly buggy in previous attempt if doorPos wasn't handled carefully, fixed here)
-            // Wait, previous logic was: set ALL to Wall, THEN set doorPos to Door.
-            // That works.
-            // But we must protect Start from being walled.
 
             validNeighbors.forEach(p => {
                 if (!(p.x === start.x && p.y === start.y)) {
@@ -141,12 +166,14 @@ class LevelGenerator {
             hasKey: false,
             deposited: false,
             futureHasKey: false,
+            leverOn: false,
             steps: 0,
             path: []
         });
 
         const visited = new Set();
-        const stateKey = (s) => `${s.px},${s.py},${s.fx},${s.fy},${s.hasKey ? 1 : 0},${s.deposited ? 1 : 0},${s.futureHasKey ? 1 : 0}`;
+        // State key must include lever status
+        const stateKey = (s) => `${s.px},${s.py},${s.fx},${s.fy},${s.hasKey ? 1 : 0},${s.deposited ? 1 : 0},${s.futureHasKey ? 1 : 0},${s.leverOn ? 1 : 0}`;
         visited.add(stateKey(queue[0]));
 
         while (queue.length > 0) {
@@ -165,38 +192,46 @@ class LevelGenerator {
             ];
 
             for (const dir of dirs) {
+                // PAST MOVE
                 let npx = current.px + dir.dx;
                 let npy = current.py + dir.dy;
                 let nextHasKey = current.hasKey;
                 let nextDeposited = current.deposited;
+                let nextLeverOn = current.leverOn;
 
-                if (npx < 0 || npx >= width || npy < 0 || npy >= height || pastGrid[npy][npx] === 1) {
-                    npx = current.px;
-                    npy = current.py;
+                if (npx < 0 || npx >= width || npy < 0 || npy >= height) {
+                    npx = current.px; npy = current.py;
                 } else {
                     const tile = pastGrid[npy][npx];
-                    if (tile === 5 && !nextHasKey && !nextDeposited) nextHasKey = true;
-                    if (tile === 7 && nextHasKey) {
-                        nextHasKey = false;
-                        nextDeposited = true;
+                    let blocked = false;
+                    if (tile === 1) blocked = true;
+                    if (tile === 9 && !nextLeverOn) blocked = true; // Gate blocked if lever off
+
+                    if (blocked) {
+                        npx = current.px; npy = current.py;
+                    } else {
+                        // Interactions
+                        if (tile === 5 && !nextHasKey && !nextDeposited) nextHasKey = true;
+                        if (tile === 7 && nextHasKey) { nextHasKey = false; nextDeposited = true; }
+                        if (tile === 8 && !nextLeverOn) nextLeverOn = true;
                     }
                 }
 
+                // FUTURE MOVE
                 let nfx = current.fx + dir.dx;
                 let nfy = current.fy + dir.dy;
                 let nextFutureHasKey = current.futureHasKey;
 
                 if (nfx < 0 || nfx >= width || nfy < 0 || nfy >= height) {
-                    nfx = current.fx;
-                    nfy = current.fy;
+                    nfx = current.fx; nfy = current.fy;
                 } else {
                     let tile = futureGrid[nfy][nfx];
                     let isBlocked = false;
                     if (tile === 1) isBlocked = true;
                     if (tile === 6 && !nextFutureHasKey) isBlocked = true;
+                    if (tile === 9 && !nextLeverOn) isBlocked = true; // Future gate?
                     if (isBlocked) {
-                        nfx = current.fx;
-                        nfy = current.fy;
+                        nfx = current.fx; nfy = current.fy;
                     } else {
                         if (tile === 7 && nextDeposited && !nextFutureHasKey) {
                             nextFutureHasKey = true;
@@ -206,7 +241,7 @@ class LevelGenerator {
 
                 if (npx === current.px && npy === current.py && nfx === current.fx && nfy === current.fy &&
                     nextHasKey === current.hasKey && nextDeposited === current.deposited &&
-                    nextFutureHasKey === current.futureHasKey) {
+                    nextFutureHasKey === current.futureHasKey && nextLeverOn === current.leverOn) {
                     continue;
                 }
 
@@ -216,6 +251,7 @@ class LevelGenerator {
                     hasKey: nextHasKey,
                     deposited: nextDeposited,
                     futureHasKey: nextFutureHasKey,
+                    leverOn: nextLeverOn,
                     steps: current.steps + 1,
                     path: [...current.path, dir.name]
                 };
@@ -257,9 +293,6 @@ class LevelGenerator {
             if (grid[y][x] === 0) return { x, y };
 
         } while (attempts < maxAttempts);
-
-        // Fallback: Just return 0,0 or something safe if everything fails, 
-        // though with 100 attempts on a mostly empty grid it's rare.
         return { x: 0, y: 0 };
     }
 }

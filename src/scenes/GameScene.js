@@ -64,6 +64,43 @@ class GameScene extends Phaser.Scene {
         graphics.fillStyle(0xff0000);
         graphics.fillRect(0, 0, this.tileSize, this.tileSize);
         graphics.generateTexture('door', this.tileSize, this.tileSize);
+
+        // Lever Off (Grey/Red Switch)
+        graphics.clear();
+        graphics.fillStyle(0x444444); // Base
+        graphics.fillRect(5, 25, 30, 10);
+        graphics.fillStyle(0xff0000); // Handle
+        graphics.fillRect(10, 5, 5, 20);
+        graphics.generateTexture('lever_off', this.tileSize, this.tileSize);
+
+        // Lever On (Grey/Green Switch)
+        graphics.clear();
+        graphics.fillStyle(0x444444); // Base
+        graphics.fillRect(5, 25, 30, 10);
+        graphics.fillStyle(0x00ff00); // Handle shifted
+        graphics.fillRect(25, 5, 5, 20);
+        graphics.generateTexture('lever_on', this.tileSize, this.tileSize);
+
+        // Gate Closed (Iron Bars)
+        graphics.clear();
+        graphics.fillStyle(0x333333); // Background
+        graphics.fillRect(0, 0, this.tileSize, this.tileSize);
+        graphics.fillStyle(0x888888); // Bars
+        graphics.fillRect(5, 0, 5, 40);
+        graphics.fillRect(15, 0, 5, 40);
+        graphics.fillRect(25, 0, 5, 40);
+        graphics.generateTexture('gate_closed', this.tileSize, this.tileSize);
+
+        // Gate Open (Bars down/gone) - Same as floor but maybe hint?
+        graphics.clear();
+        graphics.fillStyle(0x222222); // Floor-ish
+        graphics.fillRect(0, 0, this.tileSize, this.tileSize);
+        graphics.fillStyle(0x333333);
+        graphics.fillRect(1, 1, this.tileSize - 2, this.tileSize - 2);
+        // Small "open" indicator?
+        graphics.fillStyle(0x555555);
+        graphics.fillRect(0, 35, 40, 5); // Bars retracted
+        graphics.generateTexture('gate_open', this.tileSize, this.tileSize);
     }
 
     create() {
@@ -222,6 +259,7 @@ class GameScene extends Phaser.Scene {
         this.hasKey = false;
         this.depositedKey = false;
         this.futureHasKey = false;
+        this.leverOn = false; // Reset Lever
 
         // Restore Grids from initial copy
         if (this.levelData) {
@@ -234,7 +272,11 @@ class GameScene extends Phaser.Scene {
         }
 
         // Create Players Fresh
-        // Since renderGrid cleared containers, old players are gone.
+        if (this.playerPast) {
+            // Just destroy old ones if they werent cleared? 
+            // renderGrid clears container, so simple re-add is fine.
+            // But we need to make sure we don't duplicate logic.
+        }
 
         // Player Past
         this.playerPast = this.add.sprite(
@@ -281,6 +323,14 @@ class GameScene extends Phaser.Scene {
                     if (timeline === 'past' && this.depositedKey) tex = 'chest_full';
                     if (timeline === 'future' && this.depositedKey && !this.futureHasKey) tex = 'chest_full';
                     container.add(this.add.image(posX, posY, tex));
+                } else if (type === 8) {
+                    // Lever
+                    let tex = this.leverOn ? 'lever_on' : 'lever_off';
+                    container.add(this.add.image(posX, posY, tex));
+                } else if (type === 9) {
+                    // Lever Gate
+                    let tex = this.leverOn ? 'gate_open' : 'gate_closed';
+                    container.add(this.add.image(posX, posY, tex));
                 }
             }
         }
@@ -297,9 +347,40 @@ class GameScene extends Phaser.Scene {
 
     handleInput(direction) {
         if (this.isGameOver) return;
-        if (!this.playerPast || !this.playerFuture) return; // Safety check
+        if (!this.playerPast || !this.playerFuture) return;
 
-        const pastMoved = this.physicsSystem.moveEntity(this.playerPast, direction, this.pastGrid);
+        // Check for Gate Blocking (Tile 9)
+        // Past Logic:
+        let pdx = 0, pdy = 0;
+        if (direction === 'left') pdx = -1; else if (direction === 'right') pdx = 1;
+        else if (direction === 'up') pdy = -1; else if (direction === 'down') pdy = 1;
+
+        let nextPX = this.playerPast.currGridX + pdx;
+        let nextPY = this.playerPast.currGridY + pdy;
+        let pBlocked = false;
+        if (nextPX >= 0 && nextPX < this.cols && nextPY >= 0 && nextPY < this.rows) {
+            if (this.pastGrid[nextPY][nextPX] === 9 && !this.leverOn) pBlocked = true;
+        }
+
+        let pastMoved = false;
+        if (!pBlocked) {
+            pastMoved = this.physicsSystem.moveEntity(this.playerPast, direction, this.pastGrid);
+        }
+
+        // Future Logic (Check Doors AND Gates)
+        let fdx = pdx, fdy = pdy;
+        let nextFX = this.playerFuture.currGridX + fdx;
+        let nextFY = this.playerFuture.currGridY + fdy;
+        let fBlocked = false;
+        if (nextFX >= 0 && nextFX < this.cols && nextFY >= 0 && nextFY < this.rows) {
+            if (this.futureGrid[nextFY][nextFX] === 6 && !this.futureHasKey) fBlocked = true;
+            if (this.futureGrid[nextFY][nextFX] === 9 && !this.leverOn) fBlocked = true; // Gate exists in future?
+        }
+
+        let futureMoved = false;
+        if (!fBlocked) {
+            futureMoved = this.physicsSystem.moveEntity(this.playerFuture, direction, this.futureGrid);
+        }
 
         let needsRender = false;
 
@@ -315,38 +396,29 @@ class GameScene extends Phaser.Scene {
                 needsRender = true;
                 console.log("Key Picked Up");
             }
-
             if (tile === 7 && this.hasKey) { // Chest
                 this.hasKey = false;
                 this.depositedKey = true;
                 needsRender = true;
                 console.log("Key Deposited");
             }
-        }
-
-        // Future Pre-check (Doors)
-        let fdx = 0, fdy = 0;
-        if (direction === 'left') fdx = -1;
-        if (direction === 'right') fdx = 1;
-        if (direction === 'up') fdy = -1;
-        if (direction === 'down') fdy = 1;
-
-        const nextFX = this.playerFuture.currGridX + fdx;
-        const nextFY = this.playerFuture.currGridY + fdy;
-        let blockedByDoor = false;
-
-        if (nextFX >= 0 && nextFX < this.cols && nextFY >= 0 && nextFY < this.rows) {
-            if (this.futureGrid[nextFY][nextFX] === 6 && !this.futureHasKey) {
-                blockedByDoor = true;
+            if (tile === 8) { // Lever
+                // Toggle? Or One-way? "Switch".
+                // Let's make it toggle for complexity, but solution assumes On.
+                // Simple: Turn ON if Off.
+                if (!this.leverOn) {
+                    this.leverOn = true;
+                    needsRender = true;
+                    console.log("Lever Activated");
+                }
             }
         }
 
-        let futureMoved = false;
-        if (!blockedByDoor) {
-            futureMoved = this.physicsSystem.moveEntity(this.playerFuture, direction, this.futureGrid);
-        }
+        // Future interactions (Lever in future? Paradox? Let's say Lever exists in both but Past takes precedence)
+        // If Future walks on Lever (8), should it work? 
+        // Logic: Lever in Past opens Gate in Past (to get Key). 
+        // Does Future have a lever? Maybe not.
 
-        // Future Interactions
         if (futureMoved) {
             const fx = this.playerFuture.currGridX;
             const fy = this.playerFuture.currGridY;
