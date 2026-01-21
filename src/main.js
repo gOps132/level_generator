@@ -1,16 +1,16 @@
 const config = {
     type: Phaser.AUTO, // WebGL if available, else Canvas
-    width: window.innerWidth, // Fullscreen canvas initially
-    height: window.innerHeight,
+    width: 800,
+    height: 600,
     parent: 'game-container',
     backgroundColor: '#1a1a1a',
     scene: [window.GameScene], // Load our GameScene
     scale: {
-        mode: Phaser.Scale.RESIZE,
+        mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH
     },
     physics: {
-        default: 'arcade', // Not strictly used since we do GridPhysics manually, but good to have
+        default: 'arcade',
         arcade: {
             debug: false
         }
@@ -18,8 +18,3 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
-
-// Handle window resize dynamically if needed
-window.addEventListener('resize', () => {
-    game.scale.resize(window.innerWidth, window.innerHeight);
-});

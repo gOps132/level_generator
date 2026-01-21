@@ -65,6 +65,12 @@ body {
     min-width: 200px;
     max-width: 30vw;
     /* User request: limit width */
+    opacity: 0.2;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.controls-panel:hover {
+    opacity: 1;
 }
 
 .controls-panel h3 {

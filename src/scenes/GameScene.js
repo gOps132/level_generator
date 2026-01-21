@@ -71,7 +71,8 @@ class GameScene extends Phaser.Scene {
         this.levelGenerator = new window.LevelGenerator();
 
         this.pastContainer = this.add.container(0, 0);
-        this.futureContainer = this.add.container(this.cols * this.tileSize + 20, 0);
+        // Initial position, will be updated in generateLevel
+        this.futureContainer = this.add.container(0, 0);
 
         this.stepsLeft = 50;
         this.updateCounterUI();
@@ -110,7 +111,7 @@ class GameScene extends Phaser.Scene {
     }
 
     generateLevel() {
-        // Safe Cleanup (though resetLevelState handles containers)
+        // Safe Cleanup
         if (this.winText) this.winText.destroy();
         if (this.loseText) this.loseText.destroy();
 
@@ -133,7 +134,6 @@ class GameScene extends Phaser.Scene {
         this.minMoves = this.levelData.minMoves;
         this.solutionPath = this.levelData.solutionPath || [];
 
-        // UPDATE UI WITH SOLUTION
         // UPDATE UI WITH SOLUTION
         const solutionBox = document.getElementById('solution-box');
         if (solutionBox) {
@@ -171,21 +171,41 @@ class GameScene extends Phaser.Scene {
             };
         }
 
-        // Camera Fit
-        const totalWidth = (this.cols * this.tileSize) * 2 + 20;
-        const totalHeight = this.rows * this.tileSize;
-        const camera = this.cameras.main;
-        camera.centerOn(totalWidth / 2, totalHeight / 2);
-        if (totalHeight > 600 || totalWidth > 800) {
-            const zoomX = 800 / (totalWidth + 50);
-            const zoomY = 600 / (totalHeight + 50);
-            camera.setZoom(Math.min(zoomX, zoomY));
-        } else {
-            camera.setZoom(1);
-        }
+        // Camera Fit & Container Layout
+        // We set futureContainer position dynamically based on current cols
+        const gap = 4; // Small border gap
+        this.futureContainer.x = this.cols * this.tileSize + gap;
+
+        // Draw Separator Line
+        if (this.separator) this.separator.destroy();
+        this.separator = this.add.graphics();
+        this.separator.lineStyle(2, 0xffffff, 0.5); // Thin white line
+        this.separator.beginPath();
+        this.separator.moveTo(this.cols * this.tileSize + gap / 2, 0);
+        this.separator.lineTo(this.cols * this.tileSize + gap / 2, this.rows * this.tileSize);
+        this.separator.strokePath();
 
         // Initialize Level State (Rendering & Players)
+        // We do this BEFORE calculting total size just to sure? No, size is static based on cols.
         this.resetLevelState();
+
+        const totalWidth = (this.cols * this.tileSize) * 2 + gap;
+        const totalHeight = this.rows * this.tileSize;
+        const camera = this.cameras.main;
+
+        // Center on the combined width
+        camera.centerOn(totalWidth / 2, totalHeight / 2);
+
+        // Dynamic Zoom to fit screen with padding
+        // Screen buffer: 50px
+        const screenW = this.cameras.main.width;
+        const screenH = this.cameras.main.height;
+        const zoomX = (screenW - 100) / totalWidth;
+        const zoomY = (screenH - 100) / totalHeight;
+        let finalZoom = Math.min(zoomX, zoomY, 1.2); // Cap zoom at 1.2x (was 1x)
+        if (finalZoom < 0.1) finalZoom = 0.1; // Safety min
+
+        camera.setZoom(finalZoom);
     }
 
     resetLevelState() {

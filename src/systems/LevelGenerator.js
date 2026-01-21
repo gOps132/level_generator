@@ -77,20 +77,20 @@ class LevelGenerator {
         futureGrid[goal.y][goal.x] = 4;
 
         // 4. Place Key and Chest
-        const keyPos = this.findEmptySpot(pastGrid);
-        pastGrid[keyPos.y][keyPos.x] = 5; // Key
+        const excludes = [start, goal];
 
-        const chestPos = this.findEmptySpot(pastGrid);
+        const keyPos = this.findEmptySpot(pastGrid, excludes);
+        pastGrid[keyPos.y][keyPos.x] = 5; // Key
+        excludes.push(keyPos);
+
+        const chestPos = this.findEmptySpot(pastGrid, excludes);
         pastGrid[chestPos.y][chestPos.x] = 7; // Chest
-        // Ensure Future Chest is not a wall (it might have been wall from decay or random)
+        // Ensure Future Chest is not a wall
         if (futureGrid[chestPos.y][chestPos.x] === 1) futureGrid[chestPos.y][chestPos.x] = 0;
         futureGrid[chestPos.y][chestPos.x] = 7;
 
 
         // 5. Enforce Door Usage: Box in the Future Goal
-        // Surround Future Goal with Walls, leaving only ONE entrance with a Door.
-        // We move this to LAST so it overwrites any random debris or chests that might have landed there.
-        // (If chest is overwritten, solveLevel will fail and we retry, which is fine)
         const adjacent = [
             { x: goal.x, y: goal.y - 1 },
             { x: goal.x, y: goal.y + 1 },
@@ -98,20 +98,32 @@ class LevelGenerator {
             { x: goal.x + 1, y: goal.y }
         ];
 
-        // Filter valid neighbors
         const validNeighbors = adjacent.filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
 
-        if (validNeighbors.length > 0) {
-            // Pick one to be the Door
-            const doorIndex = Math.floor(Math.random() * validNeighbors.length);
-            const doorPos = validNeighbors[doorIndex];
+        // Remove start pos from valid neighbors to avoid spawning door on start
+        const safeNeighbors = validNeighbors.filter(p => !(p.x === start.x && p.y === start.y));
 
-            // Set all neighbors to Wall first
+        if (safeNeighbors.length > 0) {
+            const doorIndex = Math.floor(Math.random() * safeNeighbors.length);
+            const doorPos = safeNeighbors[doorIndex];
+
+            // Set all neighbors to Wall first (EXCEPT start)
             validNeighbors.forEach(p => {
-                futureGrid[p.y][p.x] = 1;
+                if (!(p.x === start.x && p.y === start.y) && !(p.x === doorPos.x && p.y === doorPos.y)) {
+                    futureGrid[p.y][p.x] = 1;
+                }
+            });
+            // (Note: Above logic was slightly buggy in previous attempt if doorPos wasn't handled carefully, fixed here)
+            // Wait, previous logic was: set ALL to Wall, THEN set doorPos to Door.
+            // That works.
+            // But we must protect Start from being walled.
+
+            validNeighbors.forEach(p => {
+                if (!(p.x === start.x && p.y === start.y)) {
+                    futureGrid[p.y][p.x] = 1;
+                }
             });
 
-            // Set chosen one to Door
             futureGrid[doorPos.y][doorPos.x] = 6;
         }
 
@@ -134,7 +146,6 @@ class LevelGenerator {
         });
 
         const visited = new Set();
-        // State key must include key status
         const stateKey = (s) => `${s.px},${s.py},${s.fx},${s.fy},${s.hasKey ? 1 : 0},${s.deposited ? 1 : 0},${s.futureHasKey ? 1 : 0}`;
         visited.add(stateKey(queue[0]));
 
@@ -227,7 +238,7 @@ class LevelGenerator {
         return grid;
     }
 
-    findEmptySpot(grid) {
+    findEmptySpot(grid, excludes = []) {
         let x, y;
         let attempts = 0;
         const maxAttempts = 100;
@@ -235,8 +246,21 @@ class LevelGenerator {
             x = Math.floor(Math.random() * grid[0].length);
             y = Math.floor(Math.random() * grid.length);
             attempts++;
-        } while (grid[y][x] !== 0 && attempts < maxAttempts);
-        return { x, y };
+
+            // Check overlaps
+            let overlap = false;
+            for (const p of excludes) {
+                if (p.x === x && p.y === y) overlap = true;
+            }
+            if (overlap) continue;
+
+            if (grid[y][x] === 0) return { x, y };
+
+        } while (attempts < maxAttempts);
+
+        // Fallback: Just return 0,0 or something safe if everything fails, 
+        // though with 100 attempts on a mostly empty grid it's rare.
+        return { x: 0, y: 0 };
     }
 }
 
