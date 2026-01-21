@@ -227,12 +227,7 @@ class LevelGenerator {
             }
         }
 
-        // Critical Objects Protection
-        // Sometimes you interact with a tile by bumping into it but not stepping ON it?
-        // No, current logic requires stepping ON.
-        // But what about the Key room? The neighbors of Key need to be preserved?
-        // Let's iterate grid and find critical items (5, 6, 7, 8, 9).
-        // If they exist, MARK them as visited so they don't get walled.
+        // Protect critical objects
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 const pTile = pastGrid[y][x];

@@ -11,12 +11,8 @@ class GameScene extends Phaser.Scene {
         const graphics = this.make.graphics({ x: 0, y: 0, add: false });
 
         // Wall (Blackout style)
-        // User wants unused areas blacked out.
-        // We make walls Void-like.
         graphics.fillStyle(0x000000);
         graphics.fillRect(0, 0, this.tileSize, this.tileSize);
-        // Subtle border to distinguish actual walls from edge of screen if needed?
-        // Or just pure void. Let's do pure void but maybe a tiny faint outline for grid reading.
         graphics.lineStyle(1, 0x111111, 1);
         graphics.strokeRect(0, 0, this.tileSize, this.tileSize);
         graphics.generateTexture('wall', this.tileSize, this.tileSize);
@@ -190,41 +186,8 @@ class GameScene extends Phaser.Scene {
         this.solutionPath = this.levelData.solutionPath || [];
 
         // UPDATE UI WITH SOLUTION
-        const solutionBox = document.getElementById('solution-box');
-        if (solutionBox) {
-            const compressed = [];
-            if (this.solutionPath.length > 0) {
-                let currentMove = this.solutionPath[0];
-                let count = 1;
-                for (let i = 1; i < this.solutionPath.length; i++) {
-                    if (this.solutionPath[i] === currentMove) {
-                        count++;
-                    } else {
-                        compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
-                        currentMove = this.solutionPath[i];
-                        count = 1;
-                    }
-                }
-                compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
-            }
-
-            solutionBox.innerText = compressed.join(', ').toUpperCase();
-            solutionBox.style.display = 'none';
-        }
-
-        const solutionBtn = document.getElementById('solution-btn');
-        if (solutionBtn) {
-            solutionBtn.innerText = 'SHOW SOLUTION';
-            solutionBtn.onclick = () => {
-                if (solutionBox.style.display === 'none') {
-                    solutionBox.style.display = 'block';
-                    solutionBtn.innerText = 'HIDE SOLUTION';
-                } else {
-                    solutionBox.style.display = 'none';
-                    solutionBtn.innerText = 'SHOW SOLUTION';
-                }
-            };
-        }
+        // UPDATE UI WITH SOLUTION
+        this.updateSolutionUI();
 
         // Camera Fit & Container Layout
         // Camera Fit & Container Layout
@@ -262,9 +225,7 @@ class GameScene extends Phaser.Scene {
 
         // Create Players Fresh
         if (this.playerPast) {
-            // Just destroy old ones if they werent cleared? 
-            // renderGrid clears container, so simple re-add is fine.
-            // But we need to make sure we don't duplicate logic.
+            // Already handled by renderGrid clearing
         }
 
         // Player Past
@@ -403,11 +364,7 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        // Future interactions (Lever in future? Paradox? Let's say Lever exists in both but Past takes precedence)
-        // If Future walks on Lever (8), should it work? 
-        // Logic: Lever in Past opens Gate in Past (to get Key). 
-        // Does Future have a lever? Maybe not.
-
+        // Future interactions
         if (futureMoved) {
             const fx = this.playerFuture.currGridX;
             const fy = this.playerFuture.currGridY;
@@ -524,8 +481,14 @@ class GameScene extends Phaser.Scene {
             this.cols = save.cols;
             this.rows = save.rows;
 
+            // Restore Logic State
+            this.startPos = this.levelData.start;
+            this.minMoves = this.levelData.minMoves;
+            this.solutionPath = this.levelData.solutionPath || [];
+
             // Re-run setup that depends on level size (Camera mostly)
             this.setupCamera();
+            this.updateSolutionUI();
             this.resetLevelState();
 
         } catch (e) {
@@ -577,6 +540,46 @@ class GameScene extends Phaser.Scene {
         if (finalZoom < 0.1) finalZoom = 0.1;
 
         camera.setZoom(finalZoom);
+    }
+
+    updateSolutionUI() {
+        const solutionBox = document.getElementById('solution-box');
+        if (solutionBox) {
+            const compressed = [];
+            if (this.solutionPath && this.solutionPath.length > 0) {
+                let currentMove = this.solutionPath[0];
+                let count = 1;
+                for (let i = 1; i < this.solutionPath.length; i++) {
+                    if (this.solutionPath[i] === currentMove) {
+                        count++;
+                    } else {
+                        compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
+                        currentMove = this.solutionPath[i];
+                        count = 1;
+                    }
+                }
+                compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
+                solutionBox.innerText = compressed.join(', ').toUpperCase();
+            } else {
+                solutionBox.innerText = "NO SOLUTION PATH (FALLBACK LEVEL)";
+            }
+            // Always hide initially
+            solutionBox.style.display = 'none';
+        }
+
+        const solutionBtn = document.getElementById('solution-btn');
+        if (solutionBtn) {
+            solutionBtn.innerText = 'SHOW SOLUTION';
+            solutionBtn.onclick = () => {
+                if (solutionBox.style.display === 'none') {
+                    solutionBox.style.display = 'block';
+                    solutionBtn.innerText = 'HIDE SOLUTION';
+                } else {
+                    solutionBox.style.display = 'none';
+                    solutionBtn.innerText = 'SHOW SOLUTION';
+                }
+            };
+        }
     }
 }
 
