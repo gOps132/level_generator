@@ -1,4 +1,4 @@
-class LevelGenerator {
+export default class LevelGenerator {
     constructor() {
         // Tile Types: 0 = Empty, 1 = Wall, 2 = Player Start, 3 = Box, 4 = Goal, 5 = Key, 6 = Door, 7 = Chest, 8 = Lever, 9 = Lever Gate
     }
@@ -394,4 +394,4 @@ class LevelGenerator {
     }
 }
 
-window.LevelGenerator = LevelGenerator;
+

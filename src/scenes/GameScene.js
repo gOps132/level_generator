@@ -1,4 +1,7 @@
-class GameScene extends Phaser.Scene {
+import GridPhysics from '../systems/GridPhysics.js';
+import LevelGenerator from '../systems/LevelGenerator.js';
+
+export default class GameScene extends Phaser.Scene {
     constructor() {
         super({ key: 'GameScene' });
         this.tileSize = 40;
@@ -106,8 +109,8 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        this.physicsSystem = new window.GridPhysics(this);
-        this.levelGenerator = new window.LevelGenerator();
+        this.physicsSystem = new GridPhysics(this);
+        this.levelGenerator = new LevelGenerator();
 
         this.pastContainer = this.add.container(0, 0);
         // Initial position, will be updated in generateLevel
@@ -583,4 +586,4 @@ class GameScene extends Phaser.Scene {
     }
 }
 
-window.GameScene = GameScene;
+

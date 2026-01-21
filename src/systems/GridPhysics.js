@@ -1,4 +1,4 @@
-class GridPhysics {
+export default class GridPhysics {
     constructor(scene) {
         this.scene = scene;
         this.tileSize = 40; // Pixel size of grid tiles
@@ -30,13 +30,13 @@ class GridPhysics {
         // Note: In a full ECS, we'd query the entity manager. 
         // For now, let's assume `scene.getBoxAt(x, y)` exists or verify overlaps.
         // Simplified: Check if "3" (Box) is in the grid data.
-        
+
         // Update Grid Logical State if it was a pushable block (not implemented in basic move)
         // For Player: Just Move.
-        
+
         entity.currGridX = nextPos.x;
         entity.currGridY = nextPos.y;
-        
+
         // Tween movement for visual smoothness
         this.scene.tweens.add({
             targets: entity,
@@ -54,11 +54,11 @@ class GridPhysics {
         if (pos.y < 0 || pos.y >= grid.length || pos.x < 0 || pos.x >= grid[0].length) {
             return true;
         }
-        
+
         const tileType = grid[pos.y][pos.x];
         // 1 = Wall, 3 = Box (treated as static for naive check, need push logic later)
         if (tileType === 1) return true;
-        
+
         return false;
     }
 
@@ -68,10 +68,10 @@ class GridPhysics {
             y: Math.floor(y / this.tileSize)
         };
     }
-    
+
     // Check for "Causality"
     // If an object moves in gridA (Past), we might need to update gridB (Future)
     // For now, this will be handled in GameScene update loop.
 }
 
-window.GridPhysics = GridPhysics;
+
