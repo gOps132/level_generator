@@ -13,6 +13,16 @@
     <div id="game-container"></div>
 
     <div id="ui-layer">
+        <div id="save-load-container"
+            style="position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; z-index: 1000;">
+            <select id="save-dropdown"
+                style="padding: 5px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                <option value="">-- Load Saved Level --</option>
+            </select>
+            <button id="save-btn"
+                style="padding: 5px 10px; background: #28a745; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold;">SAVE</button>
+        </div>
+
         <div class="hud-top">
             <div class="counter-box">
                 <span>MOVES LEFT: </span>
@@ -57,6 +67,8 @@
             <div><span style="color: #ff0;">K</span> Key</div>
             <div><span style="color: #a52a2a;">☒</span> Chest</div>
             <div><span style="color: #f00;">|</span> Door</div>
+            <div><span style="color: #f00;">!</span> Lever</div>
+            <div><span style="color: #888;">|||</span> Gate</div>
         </div>
     </div>
 

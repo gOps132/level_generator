@@ -152,7 +152,7 @@ button.info-btn:hover {
     border-radius: 5px;
 }
 
-.instructions p {
-    margin: 5px 0;
-    font-size: 14px;
+
+#save-load-container {
+    pointer-events: auto;
 }

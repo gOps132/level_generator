@@ -145,6 +145,18 @@ class GameScene extends Phaser.Scene {
             document.getElementById('room-size-val').innerText = sizes[e.target.value - 1];
         };
 
+        // Save/Load Hooks
+        document.getElementById('save-btn').onclick = () => this.saveLevel();
+        const saveDropdown = document.getElementById('save-dropdown');
+        saveDropdown.onchange = (e) => {
+            if (e.target.value !== "") {
+                this.loadLevel(e.target.value);
+                e.target.value = ""; // Reset selection
+                this.game.canvas.focus();
+            }
+        };
+        this.updateSaveDropdown();
+
         this.input.keyboard.on('keydown-W', () => this.handleInput('up'));
         this.input.keyboard.on('keydown-A', () => this.handleInput('left'));
         this.input.keyboard.on('keydown-S', () => this.handleInput('down'));
@@ -215,40 +227,11 @@ class GameScene extends Phaser.Scene {
         }
 
         // Camera Fit & Container Layout
-        // We set futureContainer position dynamically based on current cols
-        const gap = 4; // Small border gap
-        this.futureContainer.x = this.cols * this.tileSize + gap;
+        // Camera Fit & Container Layout
+        this.setupCamera();
 
-        // Draw Separator Line
-        if (this.separator) this.separator.destroy();
-        this.separator = this.add.graphics();
-        this.separator.lineStyle(2, 0xffffff, 0.5); // Thin white line
-        this.separator.beginPath();
-        this.separator.moveTo(this.cols * this.tileSize + gap / 2, 0);
-        this.separator.lineTo(this.cols * this.tileSize + gap / 2, this.rows * this.tileSize);
-        this.separator.strokePath();
-
-        // Initialize Level State (Rendering & Players)
-        // We do this BEFORE calculting total size just to sure? No, size is static based on cols.
+        // Render the new level
         this.resetLevelState();
-
-        const totalWidth = (this.cols * this.tileSize) * 2 + gap;
-        const totalHeight = this.rows * this.tileSize;
-        const camera = this.cameras.main;
-
-        // Center on the combined width
-        camera.centerOn(totalWidth / 2, totalHeight / 2);
-
-        // Dynamic Zoom to fit screen with padding
-        // Screen buffer: 50px
-        const screenW = this.cameras.main.width;
-        const screenH = this.cameras.main.height;
-        const zoomX = (screenW - 100) / totalWidth;
-        const zoomY = (screenH - 100) / totalHeight;
-        let finalZoom = Math.min(zoomX, zoomY, 1.2); // Cap zoom at 1.2x (was 1x)
-        if (finalZoom < 0.1) finalZoom = 0.1; // Safety min
-
-        camera.setZoom(finalZoom);
     }
 
     resetLevelState() {
@@ -504,6 +487,96 @@ class GameScene extends Phaser.Scene {
     updateCounterUI() {
         const counter = document.getElementById('step-counter');
         if (counter) counter.innerText = this.stepsLeft;
+    }
+
+    // Save/Load System
+    saveLevel() {
+        if (!this.levelData) return;
+
+        try {
+            const saves = JSON.parse(localStorage.getItem('timetwins_saves') || '[]');
+            const timestamp = new Date().toLocaleTimeString();
+            const saveName = `Level ${saves.length + 1} (${timestamp})`;
+            const saveData = {
+                name: saveName,
+                data: this.levelData,
+                cols: this.cols,
+                rows: this.rows
+            };
+
+            saves.push(saveData);
+            localStorage.setItem('timetwins_saves', JSON.stringify(saves));
+            this.updateSaveDropdown();
+            alert(`Level Saved: ${saveName}`);
+        } catch (e) {
+            console.error("Save failed", e);
+            alert("Failed to save level (Storage full?)");
+        }
+    }
+
+    loadLevel(index) {
+        try {
+            const saves = JSON.parse(localStorage.getItem('timetwins_saves') || '[]');
+            const save = saves[index];
+            if (!save) return;
+
+            this.levelData = save.data;
+            this.cols = save.cols;
+            this.rows = save.rows;
+
+            // Re-run setup that depends on level size (Camera mostly)
+            this.setupCamera();
+            this.resetLevelState();
+
+        } catch (e) {
+            console.error("Load failed", e);
+        }
+    }
+
+    updateSaveDropdown() {
+        const dropdown = document.getElementById('save-dropdown');
+        if (!dropdown) return;
+
+        // Keep first option
+        dropdown.innerHTML = '<option value="">-- Load Saved Level --</option>';
+
+        const saves = JSON.parse(localStorage.getItem('timetwins_saves') || '[]');
+        saves.forEach((save, index) => {
+            const opt = document.createElement('option');
+            opt.value = index;
+            opt.innerText = save.name;
+            dropdown.appendChild(opt);
+        });
+    }
+
+    setupCamera() {
+        // Helper extracted from generateLevel to reuse in loadLevel
+        const gap = 4;
+        this.futureContainer.x = this.cols * this.tileSize + gap;
+
+        // Draw Separator Line
+        if (this.separator) this.separator.destroy();
+        this.separator = this.add.graphics();
+        this.separator.lineStyle(2, 0xffffff, 0.5);
+        this.separator.beginPath();
+        this.separator.moveTo(this.cols * this.tileSize + gap / 2, 0);
+        this.separator.lineTo(this.cols * this.tileSize + gap / 2, this.rows * this.tileSize);
+        this.separator.strokePath();
+
+        const totalWidth = (this.cols * this.tileSize) * 2 + gap;
+        const totalHeight = this.rows * this.tileSize;
+        const camera = this.cameras.main;
+        camera.centerOn(totalWidth / 2, totalHeight / 2);
+
+        // Zoom
+        const screenW = this.cameras.main.width;
+        const screenH = this.cameras.main.height;
+        const zoomX = (screenW - 100) / totalWidth;
+        const zoomY = (screenH - 100) / totalHeight;
+        let finalZoom = Math.min(zoomX, zoomY, 1.2);
+        if (finalZoom < 0.1) finalZoom = 0.1;
+
+        camera.setZoom(finalZoom);
     }
 }
 
