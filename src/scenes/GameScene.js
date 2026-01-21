@@ -134,9 +134,26 @@ class GameScene extends Phaser.Scene {
         this.solutionPath = this.levelData.solutionPath || [];
 
         // UPDATE UI WITH SOLUTION
+        // UPDATE UI WITH SOLUTION
         const solutionBox = document.getElementById('solution-box');
         if (solutionBox) {
-            solutionBox.innerText = this.solutionPath.join(', ').toUpperCase();
+            const compressed = [];
+            if (this.solutionPath.length > 0) {
+                let currentMove = this.solutionPath[0];
+                let count = 1;
+                for (let i = 1; i < this.solutionPath.length; i++) {
+                    if (this.solutionPath[i] === currentMove) {
+                        count++;
+                    } else {
+                        compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
+                        currentMove = this.solutionPath[i];
+                        count = 1;
+                    }
+                }
+                compressed.push(count > 1 ? `${currentMove} x${count}` : currentMove);
+            }
+
+            solutionBox.innerText = compressed.join(', ').toUpperCase();
             solutionBox.style.display = 'none';
         }
 
