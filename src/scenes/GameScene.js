@@ -10,9 +10,15 @@ class GameScene extends Phaser.Scene {
         // Generate placeholder textures programmatically
         const graphics = this.make.graphics({ x: 0, y: 0, add: false });
 
-        // Wall (Grey)
-        graphics.fillStyle(0x666666);
+        // Wall (Blackout style)
+        // User wants unused areas blacked out.
+        // We make walls Void-like.
+        graphics.fillStyle(0x000000);
         graphics.fillRect(0, 0, this.tileSize, this.tileSize);
+        // Subtle border to distinguish actual walls from edge of screen if needed?
+        // Or just pure void. Let's do pure void but maybe a tiny faint outline for grid reading.
+        graphics.lineStyle(1, 0x111111, 1);
+        graphics.strokeRect(0, 0, this.tileSize, this.tileSize);
         graphics.generateTexture('wall', this.tileSize, this.tileSize);
 
         // Player Past (Blue)

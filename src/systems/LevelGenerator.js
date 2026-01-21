@@ -15,6 +15,9 @@ class LevelGenerator {
             const solution = this.solveLevel(past, future, start, goal);
 
             if (solution) {
+                // Apply Strict Pruning based on Solution
+                this.pruneToSolution(past, future, start, goal, solution.path);
+
                 console.log(`Level generated successfully after ${attempts} attempts. Min Moves: ${solution.steps}`);
                 return { past, future, start, goal, minMoves: solution.steps, solutionPath: solution.path };
             }
@@ -77,16 +80,12 @@ class LevelGenerator {
         futureGrid[goal.y][goal.x] = 4;
 
         // 4. Place Key and Chest
-        // NEW LOGIC: Key is behind a Lever Gate (9). Lever (8) is reachable.
-
-        // A. Pick Key Location
         const excludes = [start, goal];
         const keyPos = this.findEmptySpot(pastGrid, excludes);
         pastGrid[keyPos.y][keyPos.x] = 5; // Key
         excludes.push(keyPos);
 
-        // B. Surround Key with Walls, leave 1 spot for Gate
-        // But ensure we don't block start/goal if they are close
+        // Surround Key with Walls, leave 1 spot for Gate
         const keyNeighbors = [
             { x: keyPos.x, y: keyPos.y - 1 },
             { x: keyPos.x, y: keyPos.y + 1 },
@@ -94,7 +93,6 @@ class LevelGenerator {
             { x: keyPos.x + 1, y: keyPos.y }
         ].filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
 
-        // Filter out start/goal from being walled
         const safeKeyNeighbors = keyNeighbors.filter(p =>
             !(p.x === start.x && p.y === start.y) && !(p.x === goal.x && p.y === goal.y)
         );
@@ -102,32 +100,26 @@ class LevelGenerator {
         if (safeKeyNeighbors.length > 0) {
             const gateIndex = Math.floor(Math.random() * safeKeyNeighbors.length);
             const gatePos = safeKeyNeighbors[gateIndex];
-
-            // Wall others
             safeKeyNeighbors.forEach(p => {
                 if (p !== gatePos) pastGrid[p.y][p.x] = 1;
             });
-
-            // Place Gate (9)
             pastGrid[gatePos.y][gatePos.x] = 9;
-            // Force Gate/Wall in Future too to prevent bypassing via time travel if door decayed?
             futureGrid[gatePos.y][gatePos.x] = 1;
         }
 
-        // C. Place Lever (8)
-        // Must be reachable from Start initially (i.e. not behind the gate).
+        // Place Lever
         const leverPos = this.findEmptySpot(pastGrid, excludes);
-        pastGrid[leverPos.y][leverPos.x] = 8; // Lever
+        pastGrid[leverPos.y][leverPos.x] = 8;
         excludes.push(leverPos);
 
-        // D. Place Chest
+        // Place Chest
         const chestPos = this.findEmptySpot(pastGrid, excludes);
-        pastGrid[chestPos.y][chestPos.x] = 7; // Chest
+        pastGrid[chestPos.y][chestPos.x] = 7;
         if (futureGrid[chestPos.y][chestPos.x] === 1) futureGrid[chestPos.y][chestPos.x] = 0;
         futureGrid[chestPos.y][chestPos.x] = 7;
 
 
-        // 5. Enforce Door Usage: Box in the Future Goal
+        // 5. Enforce Door Usage
         const adjacent = [
             { x: goal.x, y: goal.y - 1 },
             { x: goal.x, y: goal.y + 1 },
@@ -136,7 +128,6 @@ class LevelGenerator {
         ];
 
         const validNeighbors = adjacent.filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
-
         const safeNeighbors = validNeighbors.filter(p => !(p.x === start.x && p.y === start.y));
 
         if (safeNeighbors.length > 0) {
@@ -153,6 +144,117 @@ class LevelGenerator {
         }
 
         return { past: pastGrid, future: futureGrid, start, goal };
+    }
+
+    pruneToSolution(pastGrid, futureGrid, start, goal, path) {
+        const height = pastGrid.length;
+        const width = pastGrid[0].length;
+
+        const visitedPast = new Set();
+        const visitedFuture = new Set();
+
+        // Initial Position
+        visitedPast.add(`${start.x},${start.y}`);
+        visitedFuture.add(`${start.x},${start.y}`);
+
+        // Add Goal (Always protected)
+        visitedPast.add(`${goal.x},${goal.y}`);
+        visitedFuture.add(`${goal.x},${goal.y}`);
+
+        // State for Simulation
+        let px = start.x, py = start.y;
+        let fx = start.x, fy = start.y;
+        let hasKey = false;
+        let deposited = false;
+        let futureHasKey = false;
+        let leverOn = false;
+
+        // Trace Path
+        for (const moveName of path) {
+            let dx = 0, dy = 0;
+            if (moveName === 'up') dy = -1;
+            if (moveName === 'down') dy = 1;
+            if (moveName === 'left') dx = -1;
+            if (moveName === 'right') dx = 1;
+
+            // --- Past Move Logic ---
+            let npx = px + dx;
+            let npy = py + dy;
+            let pastBlocked = false;
+
+            if (npx < 0 || npx >= width || npy < 0 || npy >= height) {
+                npx = px; npy = py; pastBlocked = true;
+            } else {
+                const tile = pastGrid[npy][npx];
+                if (tile === 1) pastBlocked = true; // Wall
+                if (tile === 9 && !leverOn) pastBlocked = true; // Gate
+            }
+
+            if (!pastBlocked) {
+                px = npx;
+                py = npy;
+                visitedPast.add(`${px},${py}`);
+
+                // Interactions
+                const tile = pastGrid[py][px];
+                if (tile === 5) { hasKey = true; } // Key
+                if (tile === 7 && hasKey) { hasKey = false; deposited = true; } // Chest
+                if (tile === 8 && !leverOn) { leverOn = true; } // Lever
+            }
+
+            // --- Future Move Logic ---
+            let nfx = fx + dx;
+            let nfy = fy + dy;
+            let futureBlocked = false;
+
+            if (nfx < 0 || nfx >= width || nfy < 0 || nfy >= height) {
+                nfx = fx; nfy = fy; futureBlocked = true;
+            } else {
+                const tile = futureGrid[nfy][nfx];
+                if (tile === 1) futureBlocked = true;
+                if (tile === 6 && !futureHasKey) futureBlocked = true; // Door
+                if (tile === 9 && !leverOn) futureBlocked = true; // Gate
+            }
+
+            if (!futureBlocked) {
+                fx = nfx;
+                fy = nfy;
+                visitedFuture.add(`${fx},${fy}`);
+
+                // Interactions
+                const tile = futureGrid[fy][fx];
+                if (tile === 7 && deposited && !futureHasKey) { futureHasKey = true; }
+            }
+        }
+
+        // Critical Objects Protection
+        // Sometimes you interact with a tile by bumping into it but not stepping ON it?
+        // No, current logic requires stepping ON.
+        // But what about the Key room? The neighbors of Key need to be preserved?
+        // Let's iterate grid and find critical items (5, 6, 7, 8, 9).
+        // If they exist, MARK them as visited so they don't get walled.
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const pTile = pastGrid[y][x];
+                if ([5, 6, 7, 8, 9].includes(pTile)) visitedPast.add(`${x},${y}`);
+
+                const fTile = futureGrid[y][x];
+                if ([5, 6, 7, 8, 9].includes(fTile)) visitedFuture.add(`${x},${y}`);
+            }
+        }
+
+        // Apply Pruning
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                if (!visitedPast.has(`${x},${y}`)) {
+                    // Only prune if currently Empty (0)
+                    if (pastGrid[y][x] === 0) pastGrid[y][x] = 1;
+                }
+                if (!visitedFuture.has(`${x},${y}`)) {
+                    if (futureGrid[y][x] === 0) futureGrid[y][x] = 1;
+                }
+            }
+        }
     }
 
     solveLevel(pastGrid, futureGrid, start, goal) {
