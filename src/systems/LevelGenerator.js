@@ -3,13 +3,13 @@ export default class LevelGenerator {
         // Tile Types: 0 = Empty, 1 = Wall, 2 = Player Start, 3 = Box, 4 = Goal, 5 = Key, 6 = Door, 7 = Chest, 8 = Lever, 9 = Lever Gate
     }
 
-    generate(width, height, difficulty) {
+    generate(width, height, difficulty, options = { enableLevers: true, enableKeys: true }) {
         let attempts = 0;
         const maxAttempts = 200;
 
         while (attempts < maxAttempts) {
             attempts++;
-            const { past, future, start, goal } = this.tryGenerate(width, height, difficulty);
+            const { past, future, start, goal } = this.tryGenerate(width, height, difficulty, options);
 
             // Precise Check: Combined State BFS
             const solution = this.solveLevel(past, future, start, goal);
@@ -42,7 +42,7 @@ export default class LevelGenerator {
         return { past: fallback, future: fallback, start, goal, minMoves: dx + dy, solutionPath: simplePath };
     }
 
-    tryGenerate(width, height, difficulty) {
+    tryGenerate(width, height, difficulty, options) {
         const pastGrid = this.createEmptyGrid(width, height);
         const futureGrid = this.createEmptyGrid(width, height);
 
@@ -79,68 +79,104 @@ export default class LevelGenerator {
         if (futureGrid[goal.y][goal.x] === 1) futureGrid[goal.y][goal.x] = 0;
         futureGrid[goal.y][goal.x] = 4;
 
-        // 4. Place Key and Chest
-        const excludes = [start, goal];
-        const keyPos = this.findEmptySpot(pastGrid, excludes);
-        pastGrid[keyPos.y][keyPos.x] = 5; // Key
-        excludes.push(keyPos);
 
-        // Surround Key with Walls, leave 1 spot for Gate
-        const keyNeighbors = [
-            { x: keyPos.x, y: keyPos.y - 1 },
-            { x: keyPos.x, y: keyPos.y + 1 },
-            { x: keyPos.x - 1, y: keyPos.y },
-            { x: keyPos.x + 1, y: keyPos.y }
-        ].filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
-
-        const safeKeyNeighbors = keyNeighbors.filter(p =>
-            !(p.x === start.x && p.y === start.y) && !(p.x === goal.x && p.y === goal.y)
-        );
-
-        if (safeKeyNeighbors.length > 0) {
-            const gateIndex = Math.floor(Math.random() * safeKeyNeighbors.length);
-            const gatePos = safeKeyNeighbors[gateIndex];
-            safeKeyNeighbors.forEach(p => {
-                if (p !== gatePos) pastGrid[p.y][p.x] = 1;
-            });
-            pastGrid[gatePos.y][gatePos.x] = 9;
-            futureGrid[gatePos.y][gatePos.x] = 1;
-        }
-
-        // Place Lever
-        const leverPos = this.findEmptySpot(pastGrid, excludes);
-        pastGrid[leverPos.y][leverPos.x] = 8;
-        excludes.push(leverPos);
-
-        // Place Chest
-        const chestPos = this.findEmptySpot(pastGrid, excludes);
-        pastGrid[chestPos.y][chestPos.x] = 7;
-        if (futureGrid[chestPos.y][chestPos.x] === 1) futureGrid[chestPos.y][chestPos.x] = 0;
-        futureGrid[chestPos.y][chestPos.x] = 7;
-
-
-        // 5. Enforce Door Usage
-        const adjacent = [
+        // Identify Neighbors of Goal (for Exclusions and Gate/Door placement)
+        const goalNeighbors = [
             { x: goal.x, y: goal.y - 1 },
             { x: goal.x, y: goal.y + 1 },
             { x: goal.x - 1, y: goal.y },
             { x: goal.x + 1, y: goal.y }
-        ];
+        ].filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
 
-        const validNeighbors = adjacent.filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
-        const safeNeighbors = validNeighbors.filter(p => !(p.x === start.x && p.y === start.y));
 
-        if (safeNeighbors.length > 0) {
-            const doorIndex = Math.floor(Math.random() * safeNeighbors.length);
-            const doorPos = safeNeighbors[doorIndex];
+        // 4. Place Mechanics
+        // Exclude Start, Goal, and Goal Neighbors (to prevent overwriting by Goal Security)
+        const excludes = [start, goal, ...goalNeighbors];
 
-            validNeighbors.forEach(p => {
-                if (!(p.x === start.x && p.y === start.y)) {
-                    futureGrid[p.y][p.x] = 1;
-                }
-            });
+        // --- KEY Mechanic ---
+        if (options.enableKeys) {
+            const keyPos = this.findEmptySpot(pastGrid, excludes);
+            pastGrid[keyPos.y][keyPos.x] = 5; // Key
+            excludes.push(keyPos);
 
-            futureGrid[doorPos.y][doorPos.x] = 6;
+            // Surround Key with Walls (and Gate if Levers enabled)
+            const keyNeighbors = [
+                { x: keyPos.x, y: keyPos.y - 1 },
+                { x: keyPos.x, y: keyPos.y + 1 },
+                { x: keyPos.x - 1, y: keyPos.y },
+                { x: keyPos.x + 1, y: keyPos.y }
+            ].filter(p => p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
+
+            const safeKeyNeighbors = keyNeighbors.filter(p =>
+                !(p.x === start.x && p.y === start.y) && !(p.x === goal.x && p.y === goal.y)
+            );
+
+            // Only gate the key if Levers are enabled
+            if (safeKeyNeighbors.length > 0 && options.enableLevers) {
+                const gateIndex = Math.floor(Math.random() * safeKeyNeighbors.length);
+                const gatePos = safeKeyNeighbors[gateIndex];
+                safeKeyNeighbors.forEach(p => {
+                    if (p !== gatePos) pastGrid[p.y][p.x] = 1;
+                });
+                pastGrid[gatePos.y][gatePos.x] = 9;
+                futureGrid[gatePos.y][gatePos.x] = 1;
+            }
+        }
+
+        // --- LEVER Mechanic ---
+        if (options.enableLevers) {
+            const leverPos = this.findEmptySpot(pastGrid, excludes);
+            pastGrid[leverPos.y][leverPos.x] = 8;
+            excludes.push(leverPos);
+        }
+
+        // --- CHEST Mechanic (Requires Key) ---
+        if (options.enableKeys) {
+            const chestPos = this.findEmptySpot(pastGrid, excludes);
+            pastGrid[chestPos.y][chestPos.x] = 7;
+            if (futureGrid[chestPos.y][chestPos.x] === 1) futureGrid[chestPos.y][chestPos.x] = 0;
+            futureGrid[chestPos.y][chestPos.x] = 7;
+        }
+
+
+        // 5. Goal Security (Door OR Gate)
+        const safeGoalNeighbors = goalNeighbors.filter(p => !(p.x === start.x && p.y === start.y));
+
+        if (safeGoalNeighbors.length > 0) {
+            // Priority: Door (Keys) > Gate (Levers)
+            if (options.enableKeys) {
+                const doorIndex = Math.floor(Math.random() * safeGoalNeighbors.length);
+                const doorPos = safeGoalNeighbors[doorIndex];
+
+                // Surround Goal with Future Walls
+                goalNeighbors.forEach(p => {
+                    if (!(p.x === start.x && p.y === start.y)) {
+                        futureGrid[p.y][p.x] = 1;
+                    }
+                });
+
+                futureGrid[doorPos.y][doorPos.x] = 6; // Door
+            } else if (options.enableLevers) {
+                // If Keys are OFF but Levers are ON, use a Gate to block the Goal
+                const gateIndex = Math.floor(Math.random() * safeGoalNeighbors.length);
+                const gatePos = safeGoalNeighbors[gateIndex];
+
+                // Surround Goal with Past Walls to force Gate usage
+                goalNeighbors.forEach(p => {
+                    if (!(p.x === start.x && p.y === start.y)) {
+                        pastGrid[p.y][p.x] = 1; // Past Wall
+                    }
+                });
+
+                pastGrid[gatePos.y][gatePos.x] = 9; // Gate
+                // Ensure Future is also blocked or synced
+                // If we block Past, player needs Lever.
+                // We should probably leave Future open (0) or block it (1/9)
+                // If we block it with 1, future player is stuck.
+                // Let's set Future to 0 (Open) - so Future player can enter, but Past player needs Lever.
+                // Since win condition is BOTH, this works.
+                if (futureGrid[gatePos.y][gatePos.x] === 1) futureGrid[gatePos.y][gatePos.x] = 0;
+            }
         }
 
         return { past: pastGrid, future: futureGrid, start, goal };

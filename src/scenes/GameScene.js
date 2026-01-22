@@ -177,8 +177,13 @@ export default class GameScene extends Phaser.Scene {
         this.cols = sizeMap[rawSize];
         this.rows = sizeMap[rawSize];
 
+        // Get Mechanic Toggles
+        const useLevers = document.getElementById('mechanic-levers').checked;
+        const useKeys = document.getElementById('mechanic-keys').checked;
+        const options = { enableLevers: useLevers, enableKeys: useKeys };
+
         // Generate Data
-        const levelData = this.levelGenerator.generate(this.cols, this.rows, difficulty);
+        const levelData = this.levelGenerator.generate(this.cols, this.rows, difficulty, options);
 
         // Store Deep Copy
         this.levelData = JSON.parse(JSON.stringify(levelData));
@@ -204,6 +209,7 @@ export default class GameScene extends Phaser.Scene {
         this.stepsLeft = this.minMoves;
         this.updateCounterUI();
         this.isGameOver = false;
+        this.isMoving = false;
 
         if (this.winText) this.winText.destroy();
         if (this.loseText) this.loseText.destroy();
@@ -300,6 +306,7 @@ export default class GameScene extends Phaser.Scene {
 
     handleInput(direction) {
         if (this.isGameOver) return;
+        if (this.isMoving) return;
         if (!this.playerPast || !this.playerFuture) return;
 
         // Check for Gate Blocking (Tile 9)
@@ -394,12 +401,18 @@ export default class GameScene extends Phaser.Scene {
         }
 
         if (pastMoved || futureMoved) {
+            this.isMoving = true;
             this.stepsLeft--;
             this.updateCounterUI();
             this.checkWinCondition();
             if (!this.isGameOver && this.stepsLeft <= 0) {
                 this.handleLose();
             }
+
+            // Lock input for duration of tween (150ms)
+            this.time.delayedCall(150, () => {
+                this.isMoving = false;
+            });
         }
     }
 
