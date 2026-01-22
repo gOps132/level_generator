@@ -12,6 +12,14 @@
 <body>
     <div id="game-container"></div>
 
+    <div id="loading-screen" style="display: none;">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <h2 id="loading-text">GENERATING TIME STREAM...</h2>
+            <div id="loading-subtext">Calculating temporal paradoxes...</div>
+        </div>
+    </div>
+
     <div id="ui-layer">
         <div id="save-load-container"
             style="position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; z-index: 1000;">
@@ -50,6 +58,9 @@
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                     <input type="checkbox" id="mechanic-keys" checked> Enable Keys & Doors
                 </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="mechanic-boxes" checked> Enable Movable Boxes
+                </label>
             </div>
 
             <button id="generate-btn">GENERATE NEW LEVEL</button>
@@ -78,6 +89,7 @@
             <div><span style="color: #f00;">|</span> Door</div>
             <div><span style="color: #f00;">!</span> Lever</div>
             <div><span style="color: #888;">|||</span> Gate</div>
+            <div><span style="color: #bc4a3c;">▣</span> Box</div>
         </div>
     </div>
 

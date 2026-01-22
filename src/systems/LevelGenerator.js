@@ -3,22 +3,35 @@ export default class LevelGenerator {
         // Tile Types: 0 = Empty, 1 = Wall, 2 = Player Start, 3 = Box, 4 = Goal, 5 = Key, 6 = Door, 7 = Chest, 8 = Lever, 9 = Lever Gate
     }
 
-    generate(width, height, difficulty, options = { enableLevers: true, enableKeys: true }) {
+    generate(width, height, difficulty, options = { enableLevers: true, enableKeys: true, enableBoxes: true }) {
         let attempts = 0;
-        const maxAttempts = 200;
+        const maxAttempts = 150; // Increased to improve success rate
 
         while (attempts < maxAttempts) {
             attempts++;
-            const { past, future, start, goal } = this.tryGenerate(width, height, difficulty, options);
+
+            // Dynamic difficulty adjustment for generation
+            // If we fail many times, slightly reduce wall density to make space
+            let densityMod = 0;
+            if (attempts > 50) densityMod = -0.05;
+            if (attempts > 100) densityMod = -0.10;
+
+            const { past, future, start, goal } = this.tryGenerate(width, height, difficulty, options, densityMod);
 
             // Precise Check: Combined State BFS
             const solution = this.solveLevel(past, future, start, goal);
 
             if (solution) {
+                // Mandatory Box Usage Check
+                if (options.enableBoxes && solution.boxesPushed === 0) {
+                    // console.log("Level valid but no boxes pushed. Retrying.");
+                    continue;
+                }
+
                 // Apply Strict Pruning based on Solution
                 this.pruneToSolution(past, future, start, goal, solution.path);
 
-                console.log(`Level generated successfully after ${attempts} attempts. Min Moves: ${solution.steps}`);
+                console.log(`Level generated successfully after ${attempts} attempts. Min Moves: ${solution.steps}. Boxes Pushed: ${solution.boxesPushed}`);
                 return { past, future, start, goal, minMoves: solution.steps, solutionPath: solution.path };
             }
         }
@@ -42,12 +55,22 @@ export default class LevelGenerator {
         return { past: fallback, future: fallback, start, goal, minMoves: dx + dy, solutionPath: simplePath };
     }
 
-    tryGenerate(width, height, difficulty, options) {
+    tryGenerate(width, height, difficulty, options, densityModifier = 0) {
+
         const pastGrid = this.createEmptyGrid(width, height);
         const futureGrid = this.createEmptyGrid(width, height);
 
         // 1. Generate Walls
-        const wallChance = 0.1 + (difficulty * 0.03);
+        // Base chance + difficulty factor + retry modifier
+        let wallChance = 0.15 + (difficulty * 0.04) + densityModifier;
+
+        // If ALL mechanics are enabled, reduce density further by default to make room
+        if (options.enableLevers && options.enableKeys && options.enableBoxes) {
+            wallChance -= 0.05;
+        }
+
+        // Clamp
+        if (wallChance < 0.05) wallChance = 0.05;
 
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
@@ -74,7 +97,7 @@ export default class LevelGenerator {
         if (futureGrid[start.y][start.x] === 1) futureGrid[start.y][start.x] = 0;
         futureGrid[start.y][start.x] = 2;
 
-        const goal = this.findEmptySpot(pastGrid);
+        const goal = this.findEmptySpot(pastGrid, [start], start, (width + height) / 4);
         pastGrid[goal.y][goal.x] = 4; // Goal
         if (futureGrid[goal.y][goal.x] === 1) futureGrid[goal.y][goal.x] = 0;
         futureGrid[goal.y][goal.x] = 4;
@@ -179,6 +202,80 @@ export default class LevelGenerator {
             }
         }
 
+        // --- BOX Mechanic ---
+        if (options.enableBoxes) {
+            // Strategic Placement:
+            // 1. Bottlenecks (1-tile wide gaps)
+            // 2. Guards (Near Key, Lever, or Goal)
+
+            const bottlenecks = this.findBottlenecks(pastGrid);
+            const objectives = excludes.filter(p => [4, 5, 8].includes(pastGrid[p.y][p.x]));
+
+            // NEW STRATEGY: Critical Path Placement
+            // 1. Find Critical Tiles (tiles that obstruct the path if removed)
+            const criticalTiles = this.findCriticalTiles(pastGrid, start, goal, excludes);
+
+            // Prefer placing boxes on Critical Tiles (guarantees interaction)
+            // or Geometric Bottlenecks (likely interaction)
+
+            // Score candidates: Critical Tiles get high priority
+            const candidates = [];
+
+            criticalTiles.forEach(t => candidates.push({ x: t.x, y: t.y, score: 2.0 })); // High score for mandatory tiles
+            bottlenecks.forEach(b => candidates.push({ x: b.x, y: b.y, score: b.score })); // Existing geometric score
+
+            // Sort by score
+            candidates.sort((a, b) => b.score - a.score);
+
+            const numBoxes = Math.min(3, 1 + Math.floor(difficulty / 4)); // More boxes at higher difficulty
+            let placedCount = 0;
+
+            for (const cand of candidates) {
+                if (placedCount >= numBoxes) break;
+                if (cand.score < 0.1) continue;
+
+                // Check if already occupied or excluded
+                if (pastGrid[cand.y][cand.x] !== 0) continue;
+                if (excludes.some(p => p.x === cand.x && p.y === cand.y)) continue;
+
+                pastGrid[cand.y][cand.x] = 3;
+                futureGrid[cand.y][cand.x] = 3;
+                excludes.push(cand);
+                placedCount++;
+            }
+
+            // If still need to place, try near objectives
+            if (placedCount < numBoxes) {
+                for (const obj of objectives) {
+                    if (placedCount >= numBoxes) break;
+                    const neighbors = [
+                        { x: obj.x, y: obj.y - 1 }, { x: obj.x, y: obj.y + 1 },
+                        { x: obj.x - 1, y: obj.y }, { x: obj.x + 1, y: obj.y }
+                    ].filter(p =>
+                        p.x >= 0 && p.x < width && p.y >= 0 && p.y < height &&
+                        pastGrid[p.y][p.x] === 0 && !excludes.some(e => e.x === p.x && e.y === p.y)
+                    );
+
+                    if (neighbors.length > 0) {
+                        const spot = neighbors[Math.floor(Math.random() * neighbors.length)];
+                        pastGrid[spot.y][spot.x] = 3;
+                        futureGrid[spot.y][spot.x] = 3;
+                        excludes.push(spot);
+                        placedCount++;
+                    }
+                }
+            }
+
+            // Final fallback: Random but distant from start
+            while (placedCount < numBoxes) {
+                const spot = this.findEmptySpot(pastGrid, excludes, start, (width + height) / 4);
+                pastGrid[spot.y][spot.x] = 3;
+                futureGrid[spot.y][spot.x] = 3;
+                excludes.push(spot);
+                placedCount++;
+            }
+        }
+
         return { past: pastGrid, future: futureGrid, start, goal };
     }
 
@@ -204,6 +301,13 @@ export default class LevelGenerator {
         let deposited = false;
         let futureHasKey = false;
         let leverOn = false;
+        let boxes = this.getBoxPositions(pastGrid);
+
+        // Protect initial box positions
+        boxes.forEach(b => {
+            visitedPast.add(`${b.x},${b.y}`);
+            visitedFuture.add(`${b.x},${b.y}`);
+        });
 
         // Trace Path
         for (const moveName of path) {
@@ -224,6 +328,33 @@ export default class LevelGenerator {
                 const tile = pastGrid[npy][npx];
                 if (tile === 1) pastBlocked = true; // Wall
                 if (tile === 9 && !leverOn) pastBlocked = true; // Gate
+
+                // Box Pushing in Pruning
+                const hitBoxIndex = boxes.findIndex(b => b.x === npx && b.y === npy);
+                if (hitBoxIndex !== -1) {
+                    const bnx = npx + dx;
+                    const bny = npy + dy;
+                    // Check if path behind box is clear (we only allow pushing into Empty tiles 0)
+                    // AND Check for Paradox: Cannot push box onto Future Player
+                    let paradoxBlocked = false;
+                    if (bnx === fx && bny === fy) paradoxBlocked = true;
+
+                    if (bnx < 0 || bnx >= width || bny < 0 || bny >= height || pastGrid[bny][bnx] !== 0 || boxes.some(b => b.x === bnx && b.y === bny) || paradoxBlocked) {
+                        pastBlocked = true;
+                    } else {
+                        // Push!
+                        boxes[hitBoxIndex] = { x: bnx, y: bny };
+                        visitedPast.add(`${bnx},${bny}`);
+                        visitedFuture.add(`${bnx},${bny}`);
+                        // Future player needs this space clear to NOT be blocked by paradox
+                    }
+                } else if (pastGrid[npy][npx] === 3) {
+                    // PHANTOM BOX: The grid says '3' but the 'boxes' array says it's gone (moved).
+                    // In this case, we treat it as empty floor (0).
+                    // So pastBlocked remains false (unless occupied by another box or wall, which we checked above?)
+                    // Logic above: `tile === 1` checks wall. `tile === 9` checks gate.
+                    // If tile is 3 but hitBoxIndex is -1, it falls through => NOT blocked. Correct.
+                }
             }
 
             if (!pastBlocked) {
@@ -250,6 +381,7 @@ export default class LevelGenerator {
                 if (tile === 1) futureBlocked = true;
                 if (tile === 6 && !futureHasKey) futureBlocked = true; // Door
                 if (tile === 9 && !leverOn) futureBlocked = true; // Gate
+                if (boxes.some(b => b.x === nfx && b.y === nfy)) futureBlocked = true; // Box blocks future
             }
 
             if (!futureBlocked) {
@@ -300,21 +432,29 @@ export default class LevelGenerator {
             deposited: false,
             futureHasKey: false,
             leverOn: false,
+            boxes: this.getBoxPositions(pastGrid),
+            boxes: this.getBoxPositions(pastGrid),
+            boxesPushed: 0,
             steps: 0,
             path: []
         });
 
         const visited = new Set();
-        // State key must include lever status
-        const stateKey = (s) => `${s.px},${s.py},${s.fx},${s.fy},${s.hasKey ? 1 : 0},${s.deposited ? 1 : 0},${s.futureHasKey ? 1 : 0},${s.leverOn ? 1 : 0}`;
+        // State key optimization: Use single character for booleans and join with minimal chars
+        const stateKey = (s) => `${s.px},${s.py},${s.fx},${s.fy},${s.hasKey ? 'K' : '0'}${s.deposited ? 'D' : '0'}${s.futureHasKey ? 'F' : '0'}${s.leverOn ? 'L' : '0'}|${s.boxes.map(b => `${b.x},${b.y}`).join('/')}`;
         visited.add(stateKey(queue[0]));
 
-        while (queue.length > 0) {
-            const current = queue.shift();
+        let head = 0; // Pointer for queue instead of shift()
+        const maxVisited = 100000;
+
+        while (head < queue.length) {
+            const current = queue[head++];
+
+            if (visited.size > maxVisited) return null; // Hard break if too complex
 
             if (current.px === goal.x && current.py === goal.y &&
                 current.fx === goal.x && current.fy === goal.y) {
-                return { steps: current.steps, path: current.path };
+                return { steps: current.steps, path: current.path, boxesPushed: current.boxesPushed };
             }
 
             const dirs = [
@@ -331,6 +471,7 @@ export default class LevelGenerator {
                 let nextHasKey = current.hasKey;
                 let nextDeposited = current.deposited;
                 let nextLeverOn = current.leverOn;
+                let pushedABox = false;
 
                 if (npx < 0 || npx >= width || npy < 0 || npy >= height) {
                     npx = current.px; npy = current.py;
@@ -339,6 +480,31 @@ export default class LevelGenerator {
                     let blocked = false;
                     if (tile === 1) blocked = true;
                     if (tile === 9 && !nextLeverOn) blocked = true; // Gate blocked if lever off
+                    if (tile === 3) {
+                        // Box Pushing Logic
+                        const bnx = npx + dir.dx;
+                        const bny = npy + dir.dy;
+                        if (bnx < 0 || bnx >= width || bny < 0 || bny >= height) {
+                            blocked = true;
+                        } else {
+                            // Check if blocked in Past OR Future by anything (Wall, Door, Gate, or OTHER box)
+                            const isBoxAt = (x, y, boxes) => boxes.some(b => b.x === x && b.y === y);
+                            const pBlocked = pastGrid[bny][bnx] !== 0 || isBoxAt(bnx, bny, current.boxes);
+                            const fBlocked = futureGrid[bny][bnx] !== 0 || isBoxAt(bnx, bny, current.boxes);
+
+                            // PARADOX CHECK: Cannot push onto Future Player
+                            let paradoxBlocked = false;
+                            if (bnx === current.fx && bny === current.fy) paradoxBlocked = true;
+
+                            if (pBlocked || fBlocked || paradoxBlocked) {
+                                blocked = true;
+                            } else {
+                                // Push successful!
+                                // Mark pushed flag
+                                pushedABox = true;
+                            }
+                        }
+                    }
 
                     if (blocked) {
                         npx = current.px; npy = current.py;
@@ -347,6 +513,19 @@ export default class LevelGenerator {
                         if (tile === 5 && !nextHasKey && !nextDeposited) nextHasKey = true;
                         if (tile === 7 && nextHasKey) { nextHasKey = false; nextDeposited = true; }
                         if (tile === 8 && !nextLeverOn) nextLeverOn = true;
+                    }
+                }
+
+                // BOXES STATE UPDATE
+                let nextBoxes = current.boxes;
+                // If past moved into a box, and wasn't blocked, it means it pushed it.
+                if (npx !== current.px || npy !== current.py) {
+                    const hitBoxIndex = current.boxes.findIndex(b => b.x === npx && b.y === npy);
+                    if (hitBoxIndex !== -1) {
+                        nextBoxes = [...current.boxes];
+                        nextBoxes[hitBoxIndex] = { x: npx + dir.dx, y: npy + dir.dy };
+                        // Sort boxes to ensure consistent state key
+                        nextBoxes.sort((a, b) => (a.x - b.x) || (a.y - b.y));
                     }
                 }
 
@@ -363,6 +542,8 @@ export default class LevelGenerator {
                     if (tile === 1) isBlocked = true;
                     if (tile === 6 && !nextFutureHasKey) isBlocked = true;
                     if (tile === 9 && !nextLeverOn) isBlocked = true; // Future gate?
+                    if (nextBoxes.some(b => b.x === nfx && b.y === nfy)) isBlocked = true; // Box blocks future
+
                     if (isBlocked) {
                         nfx = current.fx; nfy = current.fy;
                     } else {
@@ -374,7 +555,8 @@ export default class LevelGenerator {
 
                 if (npx === current.px && npy === current.py && nfx === current.fx && nfy === current.fy &&
                     nextHasKey === current.hasKey && nextDeposited === current.deposited &&
-                    nextFutureHasKey === current.futureHasKey && nextLeverOn === current.leverOn) {
+                    nextFutureHasKey === current.futureHasKey && nextLeverOn === current.leverOn &&
+                    JSON.stringify(nextBoxes) === JSON.stringify(current.boxes)) {
                     continue;
                 }
 
@@ -385,6 +567,8 @@ export default class LevelGenerator {
                     deposited: nextDeposited,
                     futureHasKey: nextFutureHasKey,
                     leverOn: nextLeverOn,
+                    boxes: nextBoxes,
+                    boxesPushed: current.boxesPushed + (pushedABox ? 1 : 0),
                     steps: current.steps + 1,
                     path: [...current.path, dir.name]
                 };
@@ -407,13 +591,16 @@ export default class LevelGenerator {
         return grid;
     }
 
-    findEmptySpot(grid, excludes = []) {
+    findEmptySpot(grid, excludes = [], minDistFrom = null, minDist = 0) {
         let x, y;
         let attempts = 0;
-        const maxAttempts = 100;
+        const maxAttempts = 200;
+        const width = grid[0].length;
+        const height = grid.length;
+
         do {
-            x = Math.floor(Math.random() * grid[0].length);
-            y = Math.floor(Math.random() * grid.length);
+            x = Math.floor(Math.random() * width);
+            y = Math.floor(Math.random() * height);
             attempts++;
 
             // Check overlaps
@@ -423,10 +610,124 @@ export default class LevelGenerator {
             }
             if (overlap) continue;
 
+            // Check distance
+            if (minDistFrom && minDist > 0) {
+                const dist = Math.abs(x - minDistFrom.x) + Math.abs(y - minDistFrom.y);
+                if (dist < minDist) continue;
+            }
+
             if (grid[y][x] === 0) return { x, y };
 
         } while (attempts < maxAttempts);
+
+        // Final fallback if distance cannot be met
+        if (minDist > 0) return this.findEmptySpot(grid, excludes, null, 0);
         return { x: 0, y: 0 };
+    }
+
+    getBoxPositions(grid) {
+        const boxes = [];
+        for (let y = 0; y < grid.length; y++) {
+            for (let x = 0; x < grid[0].length; x++) {
+                if (grid[y][x] === 3) boxes.push({ x, y });
+            }
+        }
+        return boxes;
+    }
+
+    findBottlenecks(grid) {
+        const bottlenecks = [];
+        const height = grid.length;
+        const width = grid[0].length;
+
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                if (grid[y][x] !== 0) continue;
+
+                // Horizontal Bottleneck: Walls above and below, and air to the sides
+                const wallAbove = grid[y - 1][x] === 1;
+                const wallBelow = grid[y + 1][x] === 1;
+                const airLeft = grid[y][x - 1] === 0;
+                const airRight = grid[y][x + 1] === 0;
+
+                if (wallAbove && wallBelow && airLeft && airRight) {
+                    bottlenecks.push({ x, y, score: 0 }); // Score will be computed relative to path later
+                }
+
+                // Vertical Bottleneck: Walls left and right, and air above and below
+                const wallLeft = grid[y][x - 1] === 1;
+                const wallRight = grid[y][x + 1] === 1;
+                const airAbove = grid[y - 1][x] === 0;
+                const airBelow = grid[y + 1][x] === 0;
+
+                if (wallLeft && wallRight && airAbove && airBelow) {
+                    bottlenecks.push({ x, y, score: 0 });
+                }
+            }
+        }
+        return bottlenecks;
+    }
+
+    findCriticalTiles(grid, start, goal, excludes) {
+        // Find a path from Start to Goal
+        const path = this.findSimplePath(grid, start, goal, excludes);
+        if (!path) return []; // No path means disconnected or bad init
+
+        const critical = [];
+        const width = grid[0].length;
+        const height = grid.length;
+
+        // For each tile on path (except start/goal), try to block it and see if path exists
+        for (const pos of path) {
+            if (pos.x === start.x && pos.y === start.y) continue;
+            if (pos.x === goal.x && pos.y === goal.y) continue;
+
+            // Safety: Don't block if it's already an object (like Key or Logic Gate spot)
+            if (excludes.some(e => e.x === pos.x && e.y === pos.y)) continue;
+
+            const tempGrid = grid.map(row => [...row]);
+            tempGrid[pos.y][pos.x] = 1; // Temporary Wall
+
+            // Check connectivity
+            if (!this.checkConnectivity(tempGrid, start, goal)) {
+                critical.push(pos);
+            }
+        }
+        return critical;
+    }
+
+    findSimplePath(grid, start, goal, excludes) {
+        // BFS for just getting ANY path
+        const queue = [{ x: start.x, y: start.y, path: [] }];
+        const visited = new Set();
+        visited.add(`${start.x},${start.y}`);
+
+        while (queue.length > 0) {
+            const curr = queue.shift();
+            if (curr.x === goal.x && curr.y === goal.y) return curr.path;
+
+            const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+            for (const d of dirs) {
+                const nx = curr.x + d.x;
+                const ny = curr.y + d.y;
+
+                if (nx >= 0 && nx < grid[0].length && ny >= 0 && ny < grid.length) {
+                    if (!visited.has(`${nx},${ny}`) && grid[ny][nx] !== 1 && grid[ny][nx] !== 9) { // 1=Wall, 9=Gate (treat as blocker for simple path)
+                        // Treat 'excludes' as non-blockers usually, but if we want to place boxes ON them, 
+                        // we need to know if the path goes THROUGH them.
+                        // BUT: we don't want to place boxes on TOP of Keys/Levers. 
+                        // The `findCriticalTiles` filters those out later.
+                        visited.add(`${nx},${ny}`);
+                        queue.push({ x: nx, y: ny, path: [...curr.path, { x: nx, y: ny }] });
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    checkConnectivity(grid, start, goal) {
+        return !!this.findSimplePath(grid, start, goal, []);
     }
 }
 

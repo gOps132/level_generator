@@ -106,6 +106,20 @@ export default class GameScene extends Phaser.Scene {
         graphics.fillStyle(0x555555);
         graphics.fillRect(0, 35, 40, 5); // Bars retracted
         graphics.generateTexture('gate_open', this.tileSize, this.tileSize);
+
+        // Box (Light Brown)
+        graphics.clear();
+        graphics.fillStyle(0x8B4513);
+        graphics.fillRect(2, 2, this.tileSize - 4, this.tileSize - 4);
+        graphics.lineStyle(2, 0x5D2F0C, 1);
+        graphics.strokeRect(4, 4, this.tileSize - 8, this.tileSize - 8);
+        graphics.beginPath();
+        graphics.moveTo(4, 4);
+        graphics.lineTo(this.tileSize - 4, this.tileSize - 4);
+        graphics.moveTo(this.tileSize - 4, 4);
+        graphics.lineTo(4, this.tileSize - 4);
+        graphics.strokePath();
+        graphics.generateTexture('box', this.tileSize, this.tileSize);
     }
 
     create() {
@@ -164,10 +178,18 @@ export default class GameScene extends Phaser.Scene {
         this.generateLevel();
     }
 
-    generateLevel() {
+    async generateLevel() {
         // Safe Cleanup
         if (this.winText) this.winText.destroy();
         if (this.loseText) this.loseText.destroy();
+
+        // UI Loading
+        const loadingScreen = document.getElementById('loading-screen');
+        const loadingText = document.getElementById('loading-text');
+        if (loadingScreen) loadingScreen.style.display = 'flex';
+
+        // Helper to delay for UI update
+        const delay = ms => new Promise(res => setTimeout(res, ms));
 
         // Get Settings
         const rawDiff = document.getElementById('difficulty-slider').value;
@@ -180,13 +202,44 @@ export default class GameScene extends Phaser.Scene {
         // Get Mechanic Toggles
         const useLevers = document.getElementById('mechanic-levers').checked;
         const useKeys = document.getElementById('mechanic-keys').checked;
-        const options = { enableLevers: useLevers, enableKeys: useKeys };
+        const useBoxes = document.getElementById('mechanic-boxes').checked;
+        const options = { enableLevers: useLevers, enableKeys: useKeys, enableBoxes: useBoxes };
 
-        // Generate Data
-        const levelData = this.levelGenerator.generate(this.cols, this.rows, difficulty, options);
+        let attempts = 0;
+        const maxRetries = 10;
+        let validLevel = null;
+
+        while (attempts < maxRetries && !validLevel) {
+            attempts++;
+            if (loadingText) loadingText.innerText = `GENERATING TIME STREAM... (ATTEMPT ${attempts})`;
+
+            // Generate Data (Yield to UI thread)
+            await delay(50);
+            const levelData = this.levelGenerator.generate(this.cols, this.rows, difficulty, options);
+
+            if (options.enableBoxes) { // Only strict verify if boxes involved (complex)
+                if (loadingText) loadingText.innerText = `VERIFYING TIMELINE INTEGRITY...`;
+                await delay(20);
+                const isValid = this.verifySolution(levelData);
+                if (isValid) {
+                    validLevel = levelData;
+                } else {
+                    console.warn(`Verification Failed for Attempt ${attempts}`);
+                }
+            } else {
+                validLevel = levelData;
+            }
+        }
+
+        if (loadingScreen) loadingScreen.style.display = 'none';
+
+        if (!validLevel) {
+            alert("Could not generate a valid level after multiple attempts. Please try different settings.");
+            return;
+        }
 
         // Store Deep Copy
-        this.levelData = JSON.parse(JSON.stringify(levelData));
+        this.levelData = JSON.parse(JSON.stringify(validLevel));
 
         // Initial Logic State Setup
         this.startPos = this.levelData.start;
@@ -194,15 +247,115 @@ export default class GameScene extends Phaser.Scene {
         this.solutionPath = this.levelData.solutionPath || [];
 
         // UPDATE UI WITH SOLUTION
-        // UPDATE UI WITH SOLUTION
         this.updateSolutionUI();
 
-        // Camera Fit & Container Layout
         // Camera Fit & Container Layout
         this.setupCamera();
 
         // Render the new level
         this.resetLevelState();
+    }
+
+    verifySolution(levelData) {
+        if (!levelData.solutionPath || levelData.solutionPath.length === 0) return true; // Simple path or fallback
+
+        // Mock State
+        const pastGrid = JSON.parse(JSON.stringify(levelData.past));
+        const futureGrid = JSON.parse(JSON.stringify(levelData.future));
+        const start = levelData.start;
+        const goal = levelData.goal;
+
+        // Mock Players
+        const pPast = { active: true, currGridX: start.x, currGridY: start.y };
+        const pFuture = { active: true, currGridX: start.x, currGridY: start.y };
+        const mockScene = { playerPast: pPast, playerFuture: pFuture, tweens: { add: () => { } } };
+
+        // Physics instance with mock scene
+        // We need to bind the context correctly or create a fresh instance if needed.
+        // But our GridPhysics is a class created in create(). 
+        // Let's instantiate a temporary one or reuse checks?
+        // GridPhysics methods rely on `this.scene`. 
+        // We can create a lightweight helper.
+
+        // Better: We refactored GridPhysics to be stateless-ish except for `this.scene`.
+        // Let's make a temp physics instance.
+        const physics = new GridPhysics(mockScene);
+
+        let hasKey = false;
+        let depositedKey = false;
+        let futureHasKey = false;
+        let leverOn = false;
+
+        for (const move of levelData.solutionPath) {
+            // 1. Move Past (Simulation)
+            // We need to handle Gate/Doors/Logic manually similar to handleInput?
+            // Actually, `handleInput` contains the logic for Gates/Doors triggering.
+            // GridPhysics only does collision.
+            // So we need to REPLICATE `handleInput` logic here.
+
+            // --- REPLICATION OF LOGIC ---
+
+            // Past Logic:
+            let pdx = 0, pdy = 0;
+            if (move === 'left') pdx = -1; else if (move === 'right') pdx = 1;
+            else if (move === 'up') pdy = -1; else if (move === 'down') pdy = 1;
+
+            let nextPX = pPast.currGridX + pdx;
+            let nextPY = pPast.currGridY + pdy;
+
+            let pBlocked = false;
+            if (nextPX >= 0 && nextPX < this.cols && nextPY >= 0 && nextPY < this.rows) {
+                if (pastGrid[nextPY][nextPX] === 9 && !leverOn) pBlocked = true;
+            }
+
+            let pastMoved = false;
+            if (!pBlocked) {
+                const res = physics.moveEntity(pPast, move, pastGrid, futureGrid, true);
+                pastMoved = res.moved;
+
+                if (res.pushedBox) {
+                    const { boxPos, newBoxPos } = res;
+                    pastGrid[boxPos.y][boxPos.x] = 0;
+                    pastGrid[newBoxPos.y][newBoxPos.x] = 3;
+                    futureGrid[boxPos.y][boxPos.x] = 0;
+                    futureGrid[newBoxPos.y][newBoxPos.x] = 3;
+                }
+            }
+
+            // Future Logic
+            let nextFX = pFuture.currGridX + pdx; // moves mirrors
+            let nextFY = pFuture.currGridY + pdy;
+            let fBlocked = false;
+            if (nextFX >= 0 && nextFX < this.cols && nextFY >= 0 && nextFY < this.rows) {
+                if (futureGrid[nextFY][nextFX] === 6 && !futureHasKey) fBlocked = true; // Door
+                if (futureGrid[nextFY][nextFX] === 9 && !leverOn) fBlocked = true; // Gate
+            }
+
+            let futureMoved = false;
+            if (!fBlocked) {
+                const res = physics.moveEntity(pFuture, move, futureGrid, null, true);
+                futureMoved = res.moved;
+            }
+
+            // Interactions
+            if (pastMoved) {
+                const tile = pastGrid[pPast.currGridY][pPast.currGridX];
+                if (tile === 5) { hasKey = true; pastGrid[pPast.currGridY][pPast.currGridX] = 0; }
+                if (tile === 7 && hasKey) { hasKey = false; depositedKey = true; }
+                if (tile === 8 && !leverOn) { leverOn = true; }
+            }
+
+            if (futureMoved) {
+                const tile = futureGrid[pFuture.currGridY][pFuture.currGridX];
+                if (tile === 7 && depositedKey && !futureHasKey) { futureHasKey = true; }
+            }
+        }
+
+        // Final Check: Did we reach the goal?
+        const pastOnGoal = pastGrid[pPast.currGridY][pPast.currGridX] === 4;
+        const futureOnGoal = futureGrid[pFuture.currGridY][pFuture.currGridX] === 4;
+
+        return pastOnGoal && futureOnGoal;
     }
 
     resetLevelState() {
@@ -271,6 +424,8 @@ export default class GameScene extends Phaser.Scene {
 
                 if (type === 1) {
                     container.add(this.add.image(posX, posY, 'wall'));
+                } else if (type === 3) {
+                    container.add(this.add.image(posX, posY, 'box'));
                 } else if (type === 4) {
                     container.add(this.add.image(posX, posY, 'goal'));
                 } else if (type === 5) {
@@ -320,11 +475,24 @@ export default class GameScene extends Phaser.Scene {
         let pBlocked = false;
         if (nextPX >= 0 && nextPX < this.cols && nextPY >= 0 && nextPY < this.rows) {
             if (this.pastGrid[nextPY][nextPX] === 9 && !this.leverOn) pBlocked = true;
+            if (this.pastGrid[nextPY][nextPX] === 9 && !this.leverOn) pBlocked = true;
         }
 
-        let pastMoved = false;
+        let needsRender = false;
+
+        let pastResult = { moved: false };
         if (!pBlocked) {
-            pastMoved = this.physicsSystem.moveEntity(this.playerPast, direction, this.pastGrid);
+            pastResult = this.physicsSystem.moveEntity(this.playerPast, direction, this.pastGrid, this.futureGrid);
+        }
+        let pastMoved = pastResult.moved;
+
+        if (pastResult.pushedBox) {
+            const { boxPos, newBoxPos } = pastResult;
+            this.pastGrid[boxPos.y][boxPos.x] = 0;
+            this.pastGrid[newBoxPos.y][newBoxPos.x] = 3;
+            this.futureGrid[boxPos.y][boxPos.x] = 0;
+            this.futureGrid[newBoxPos.y][newBoxPos.x] = 3;
+            needsRender = true;
         }
 
         // Future Logic (Check Doors AND Gates)
@@ -337,12 +505,13 @@ export default class GameScene extends Phaser.Scene {
             if (this.futureGrid[nextFY][nextFX] === 9 && !this.leverOn) fBlocked = true; // Gate exists in future?
         }
 
-        let futureMoved = false;
+        let futureResult = { moved: false };
         if (!fBlocked) {
-            futureMoved = this.physicsSystem.moveEntity(this.playerFuture, direction, this.futureGrid);
+            futureResult = this.physicsSystem.moveEntity(this.playerFuture, direction, this.futureGrid);
         }
+        let futureMoved = futureResult.moved;
 
-        let needsRender = false;
+
 
         // Past Interactions
         if (pastMoved) {

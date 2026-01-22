@@ -8,13 +8,20 @@ export default class GridPhysics {
      * Attempt to move an entity in a direction.
      * @param {Phaser.GameObjects.Sprite} entity - The sprite to move.
      * @param {string} direction - 'left', 'right', 'up', 'down'.
-     * @param {Array} grid - The layout grid (2D array).
-     * @returns {boolean} - True if moved, False if blocked.
+     * @param {Array} grid - The layout grid (2D array) for the current timeline.
+     * @param {Array} otherGrid - The layout grid for the other timeline (for paradox prevention).
+     * @returns {Object} - { moved: boolean, pushedBox: boolean, boxPos: {x, y}, newBoxPos: {x, y} }
      */
-    moveEntity(entity, direction, grid) {
-        if (!entity.active) return false;
+    moveEntity(entity, direction, grid, otherGrid = null, isSimulation = false) {
+        if (!entity.active && !isSimulation) return { moved: false };
 
-        const currentPos = this.getGridPosition(entity.x, entity.y);
+        let currentPos;
+        if (isSimulation) {
+            currentPos = { x: entity.currGridX, y: entity.currGridY };
+        } else {
+            currentPos = this.getGridPosition(entity.x, entity.y);
+        }
+
         const nextPos = { x: currentPos.x, y: currentPos.y };
 
         if (direction === 'left') nextPos.x--;
@@ -22,31 +29,75 @@ export default class GridPhysics {
         if (direction === 'up') nextPos.y--;
         if (direction === 'down') nextPos.y++;
 
-        if (this.isBlocked(nextPos, grid)) {
-            return false;
+        // Bounds check
+        if (nextPos.y < 0 || nextPos.y >= grid.length || nextPos.x < 0 || nextPos.x >= grid[0].length) {
+            return { moved: false };
         }
 
-        // Check for dynamic obstacles (Boxes)
-        // Note: In a full ECS, we'd query the entity manager. 
-        // For now, let's assume `scene.getBoxAt(x, y)` exists or verify overlaps.
-        // Simplified: Check if "3" (Box) is in the grid data.
+        const tileType = grid[nextPos.y][nextPos.x];
+        // console.log(`Attempt Move: ${direction} | Cur: ${currentPos.x},${currentPos.y} | Next: ${nextPos.x},${nextPos.y} | Tile: ${tileType}`);
 
-        // Update Grid Logical State if it was a pushable block (not implemented in basic move)
-        // For Player: Just Move.
+        // Wall check
+        if (tileType === 1) return { moved: false };
+
+        // Box check
+        let pushedBox = false;
+        let boxPos = null;
+        let newBoxPos = null;
+
+        if (tileType === 3) {
+            // Only Past can push (we assume entity is Past if otherGrid is provided)
+            // Or we check entity texture? Better to just check if otherGrid is provided.
+            if (!otherGrid) return { moved: false }; // Future cannot move boxes
+
+            const boxNextPos = { x: nextPos.x, y: nextPos.y };
+            if (direction === 'left') boxNextPos.x--;
+            if (direction === 'right') boxNextPos.x++;
+            if (direction === 'up') boxNextPos.y--;
+            if (direction === 'down') boxNextPos.y++;
+
+            // Bounds check for box
+            if (boxNextPos.y < 0 || boxNextPos.y >= grid.length || boxNextPos.x < 0 || boxNextPos.x >= grid[0].length) {
+                return { moved: false };
+            }
+
+            // Check if blocked in Past or Future
+            const pastBlocked = grid[boxNextPos.y][boxNextPos.x] !== 0;
+            const futureBlocked = otherGrid[boxNextPos.y][boxNextPos.x] !== 0;
+
+            // Check collision with OTHER player (Paradox Prevention)
+            // If pushing in Past, check if Future player is on the target tile
+            let paradoxBlocked = false;
+            if (this.scene.playerFuture) {
+                const fx = this.scene.playerFuture.currGridX;
+                const fy = this.scene.playerFuture.currGridY;
+                if (fx === boxNextPos.x && fy === boxNextPos.y) paradoxBlocked = true;
+            }
+
+            if (pastBlocked || futureBlocked || paradoxBlocked) {
+                return { moved: false }; // Paradox or blocked
+            }
+
+            pushedBox = true;
+            boxPos = { x: nextPos.x, y: nextPos.y };
+            newBoxPos = { x: boxNextPos.x, y: boxNextPos.y };
+        }
 
         entity.currGridX = nextPos.x;
         entity.currGridY = nextPos.y;
 
-        // Tween movement for visual smoothness
-        this.scene.tweens.add({
-            targets: entity,
-            x: nextPos.x * this.tileSize + this.tileSize / 2,
-            y: nextPos.y * this.tileSize + this.tileSize / 2,
-            duration: 150,
-            ease: 'Linear'
-        });
+        if (!isSimulation) {
+            // Tween movement for visual smoothness
+            this.scene.tweens.add({
+                targets: entity,
+                x: nextPos.x * this.tileSize + this.tileSize / 2,
+                y: nextPos.y * this.tileSize + this.tileSize / 2,
+                duration: 150,
+                ease: 'Linear'
+            });
+        }
 
-        return true;
+        return { moved: true, pushedBox, boxPos, newBoxPos };
     }
 
     isBlocked(pos, grid) {
@@ -56,8 +107,8 @@ export default class GridPhysics {
         }
 
         const tileType = grid[pos.y][pos.x];
-        // 1 = Wall, 3 = Box (treated as static for naive check, need push logic later)
-        if (tileType === 1) return true;
+        // 1 = Wall, 3 = Box (treated as static if we hit it without pushing)
+        if (tileType === 1 || tileType === 3) return true;
 
         return false;
     }
